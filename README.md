@@ -1,32 +1,133 @@
-# Phish_ETL Platform
+# Phish_ETL
+Automated Phishing Analysis, Triage & Firewall Enforcement
 
-Fully automated Phishing Analysis & Triage platform designed to generate high-fidelity, Next-Gen Firewall (NGFW) External Dynamic Lists (EDLs).
+Phish_ETL is a fully automated phishing ingestion, enrichment, and enforcement platform designed to turn suspicious emails into **live, auto-expiring firewall blocklists** with minimal analyst effort.
 
-## MVP Architecture
-Built natively with **FastAPI** (Backend), **PostgreSQL** (Database), and **React** (Frontend) encapsulated within a single orchestration layer.
+Upload suspicious emails → extract indicators → enrich with OSINT → approve → publish directly to NGFW External Dynamic Lists (EDLs).
 
-- **Automated Ingestion**: Upload raw `.eml`, `.msg`, or `.mbox` files. The Python parser surgically extracts URLs and IPs from deeply nested MIME payloads while rejecting duplicates utilizing strict `Message-ID` hashing.
-- **OSINT Enrichment**: Extracted Indicators of Compromise (IOCs) are quietly dumped into a background ASGI queue where they are scored automatically against URLhaus, ThreatFox, and VirusTotal to generate an actionable 0-99 Confidence Rating.
-- **Golden Indicator Governance**: Analysts maintain complete control bridging the Threat Database. They can easily `Undo Verdicts`, completely obliterate indicators from disk (`Delete`), and effortlessly cycle indicators into production.
-- **Firewall Integration (Zero Maintenance)**: 
-  - Generates completely decoupled list feeds: `/api/feeds/edl/url` and `/api/feeds/edl/ip`.
-  - Ensures exactly *0 duplicate rows* via Python casting models.
-  - Features an **Automated 30-Day Garbage Collection Rule (TTL)**. Blocklists inherently expire 30 days after the email was analyzed to prevent catastrophic Network Memory leakage on the firewalls. 
+---
 
-## Administration & Security
-The entire platform is protected out-of-the-box using strict Single-Admin JWT authentication logic. 
+## Why Phish_ETL Exists
 
-**Setup Requirements:**
-Inside the project root, create a `.env` file explicitly holding your master password and your commercial API keys.
-```bash
-ADMIN_PASSWORD=your_super_secret_password
-VT_API_KEY=optional_virustotal_key
-```
+Security teams routinely face:
 
-## Running the Platform
-1) Execute the build container suite:
-```bash
-docker compose up -d --build
-```
-2) Access the public portal: `http://localhost:5173`. 
-*(Note: To query the API or review indicators, you must click Admin Login and provide the password mapped in your `.env` file).*
+- Manual IOC extraction from phishing emails
+- Multiple OSINT tools with no lifecycle control
+- Firewall blocklists that grow forever
+- No automatic cleanup of stale indicators
+
+Phish_ETL solves this by providing **opinionated, lifecycle-aware phishing automation** that feeds directly into your firewalls.
+
+---
+
+## Platform Architecture
+
+- **Backend:** FastAPI (Python / ASGI)
+- **Database:** PostgreSQL
+- **Frontend:** React
+- **Deployment:** Docker Compose (single stack)
+
+Everything runs locally or on-prem with no external dependencies beyond optional OSINT APIs.
+
+---
+
+## End‑User Workflow
+
+### 1. Submit a Suspicious Email
+
+End users (teachers, staff, intake queues) upload suspicious emails via the public portal.
+
+Supported formats:
+- `.eml`
+- `.msg`
+- `.mbox`
+
+Duplicates are automatically rejected using strict `Message-ID` hashing.
+
+![Teacher Submission](docs/images/teacher-submission.png)
+
+---
+
+### 2. Automated IOC Extraction & Enrichment
+
+Once ingested, Phish_ETL automatically:
+
+- Extracts URLs and IPs from deeply nested MIME payloads
+- Normalizes and deduplicates indicators
+- Enriches indicators asynchronously using:
+  - URLhaus
+  - ThreatFox
+  - VirusTotal (optional)
+
+Each indicator receives a **0–99 confidence score** based on OSINT consensus.
+
+---
+
+### 3. Analyst Review & Governance (Admin)
+
+Admins authenticate to:
+
+- Review indicators
+- Approve or deny enforcement
+- Undo previous verdicts
+- Permanently delete indicators from disk
+
+![Threat Database](docs/images/threat-database.png)
+
+This ensures **human governance** over automated enforcement.
+
+---
+
+### 4. Firewall Integration (Zero Maintenance)
+
+Approved indicators are immediately published to External Dynamic Lists:
+
+- URL Feed  
+  `/api/feeds/edl/url`
+
+- IP Feed  
+  `/api/feeds/edl/ip`
+
+Key properties:
+- Zero duplicate rows (schema-enforced)
+- Read-only consumption by firewalls
+- No agents, no cron jobs, no manual exports
+
+---
+
+### 5. Automatic Indicator Expiration (TTL)
+
+To prevent firewall memory leakage:
+
+- All indicators expire **30 days** after ingestion
+- TTL is enforced automatically
+- Expired indicators disappear from feeds without admin action
+
+This keeps firewall rule memory clean and predictable.
+
+---
+
+## Security Model
+
+- Single-admin JWT-based authentication
+- Admin actions fully protected
+- No exposed OSINT API keys
+- Public submission interface is non-privileged
+
+![Admin Login](docs/images/admin-login.png)
+
+---
+
+## System Analytics
+
+Admins can review:
+
+- Database health
+- Emails ingested
+- Indicators tracked
+- OSINT engine availability
+- Firewall EDL access logs
+
+![System Analytics](docs/images/system-analytics.png)
+
+
