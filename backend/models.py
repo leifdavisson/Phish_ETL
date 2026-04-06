@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, JSON
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -24,6 +24,7 @@ class Indicator(Base):
     
     # Enrichment
     vt_score = Column(Integer, nullable=True) # VirusTotal score context
+    enrichment_details = Column(JSON, nullable=True) # Detailed results from URLhaus, ThreatFox, VirusTotal
     
     # Workflow Status
     # PENDING, APPROVED (goes to fw), DENIED (false positive)
@@ -38,3 +39,10 @@ class FeedAccessLog(Base):
     endpoint = Column(String) # e.g., 'url' or 'ip'
     ip_address = Column(String) # the firewall pulling the feed
     accessed_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Setting(Base):
+    __tablename__ = "settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True)
+    value = Column(String)

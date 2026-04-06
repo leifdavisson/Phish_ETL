@@ -7,6 +7,8 @@ function App() {
   const [history, setHistory] = useState([]);
   const [sysStatus, setSysStatus] = useState<any>(null);
   const [edlLogs, setEdlLogs] = useState([]);
+  const [settings, setSettings] = useState<any>({ urlhaus_api_key: '', threatfox_api_key: '', vt_api_key: '' });
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   
   // Authentication State
   const [token, setToken] = useState(localStorage.getItem('admin_token') || '');
@@ -22,7 +24,10 @@ function App() {
     if (!token) return;
     if (activeTab === 'review') fetchQueue();
     else if (activeTab === 'threatdb') fetchHistory();
-    else if (activeTab === 'status') fetchStatus();
+    else if (activeTab === 'status') {
+      fetchStatus();
+      fetchSettings();
+    }
   }, [activeTab, token]);
 
   const authFetch = async (url: string, options: any = {}) => {
@@ -90,6 +95,31 @@ function App() {
       const logData = await logRes.json();
       setEdlLogs(logData);
     } catch (err) { console.error(err); }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await authFetch('/api/settings');
+      const data = await res.json();
+      // Merge with defaults to ensure keys exist
+      setSettings((prev: any) => ({ ...prev, ...data }));
+    } catch (err) { console.error(err); }
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    try {
+      await authFetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      alert("Settings saved successfully!");
+      fetchSettings();
+      fetchStatus();
+    } catch (err) { console.error(err); }
+    finally { setIsSavingSettings(false); }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,6 +200,33 @@ function App() {
     return <span>{score} / 99</span>;
   };
 
+  const renderSourceBreakdown = (details: any) => {
+    if (!details) return <span style={{ color: 'var(--text-muted)' }}>N/A</span>;
+    return (
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        {Object.entries(details).map(([source, data]: [string, any]) => {
+          let bgColor = 'var(--bg-secondary)'; // default
+          let color = 'white';
+          
+          if (data.status === 'success') { bgColor = 'rgba(46, 160, 67, 0.2)'; color = '#3fb950'; }
+          else if (data.status === 'error') { bgColor = 'rgba(215, 58, 73, 0.2)'; color = '#ff7b72'; }
+          else if (data.status === 'pending') { bgColor = 'rgba(210, 153, 34, 0.2)'; color = '#d29922'; }
+
+          return (
+            <div key={source} title={data.details} style={{
+              background: bgColor, color: color, padding: '4px 8px', borderRadius: '4px', fontSize: '0.75em', border: `1px solid ${color}`, cursor: 'help', display: 'flex', flexDirection: 'column'
+            }}>
+              <strong>{source}</strong>
+              <span style={{ fontSize: '0.9em', filter: 'brightness(1.5)' }}>
+                {data.status === 'pending' ? 'Scanning...' : (data.score !== undefined ? `${data.score} / 99` : 'Error')}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="dashboard-container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -241,7 +298,7 @@ function App() {
           <h2>Pending Indicators</h2>
           {queue.length === 0 ? ( <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>🎉 The queue is empty. Good job!</div> ) : (
             <table className="data-table">
-              <thead><tr><th>Target Value</th><th>Source Email</th><th>Type</th><th>OSINT Confidence</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Target Value</th><th>Source Email</th><th>Type</th><th>OSINT Confidence</th><th>Sources</th><th>Actions</th></tr></thead>
               <tbody>
                 {queue.map((item: any) => (
                   <tr key={item.id}>
@@ -249,6 +306,7 @@ function App() {
                     <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}><strong>{item.sender}</strong><br/>{item.subject}</td>
                     <td>{item.type}</td>
                     <td>{renderOsintScore(item.score)}</td>
+                    <td>{renderSourceBreakdown(item.enrichment_details)}</td>
                     <td>
                       <button className="action-btn btn-approve" onClick={() => handleVerdict(item.id, 'APPROVED')}>Publish</button>
                       <button className="action-btn btn-deny" onClick={() => handleVerdict(item.id, 'DENIED')}>Mark Safe</button>
@@ -266,7 +324,7 @@ function App() {
           <h2>Active Threat Database</h2>
           {history.length === 0 ? ( <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No historical verdicts.</div> ) : (
             <table className="data-table">
-              <thead><tr><th>Target Value</th><th>Current State</th><th>Source Context</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Target Value</th><th>Current State</th><th>Source Context</th><th>Sources</th><th>Actions</th></tr></thead>
               <tbody>
                 {history.map((item: any) => {
                   const daysOld = Math.floor((new Date().getTime() - new Date(item.submitted_at).getTime()) / (1000 * 3600 * 24));
@@ -279,6 +337,7 @@ function App() {
                       {item.status === 'APPROVED' && ( <div style={{ marginTop: '8px', fontSize: '0.8em', color: daysLeft <= 5 ? 'var(--danger)' : 'var(--text-muted)' }}>⏳ Expires in {daysLeft} days</div> )}
                     </td>
                     <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}><strong>{item.sender}</strong><br/>{item.subject}</td>
+                    <td>{renderSourceBreakdown(item.enrichment_details)}</td>
                     <td style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <button className="action-btn" style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={() => handleUndo(item.id)}>Undo Verdict</button>
                       <button className="action-btn" style={{ background: 'var(--danger)', color: '#fff' }} onClick={() => handleDelete(item.id)}>Delete</button>
@@ -305,8 +364,47 @@ function App() {
               <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginTop: 0 }}>External OSINT</h3>
               <p><strong>URLhaus API:</strong> <span style={{ color: 'var(--success)' }}>{sysStatus?.external?.urlhaus_api}</span></p>
               <p><strong>ThreatFox API:</strong> <span style={{ color: 'var(--success)' }}>{sysStatus?.external?.threatfox_api}</span></p>
-              <p><strong>VirusTotal Env:</strong> <span style={{ color: sysStatus?.external?.virustotal_api === 'Configured' ? 'var(--success)' : 'var(--text-muted)' }}>{sysStatus?.external?.virustotal_api}</span></p>
+              <p><strong>VirusTotal Env:</strong> <span style={{ color: sysStatus?.external?.virustotal_api.startsWith('Configured') ? 'var(--success)' : 'var(--text-muted)' }}>{sysStatus?.external?.virustotal_api}</span></p>
             </div>
+          </div>
+
+          <div style={{ marginTop: '30px', background: 'var(--bg-color)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginTop: 0 }}>Global OSINT Settings</h3>
+              <form onSubmit={handleSaveSettings} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                  <div>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>URLhaus API Key</label>
+                      <input 
+                        type="password" 
+                        placeholder={settings.urlhaus_api_key || "Paste Key here..."}
+                        value={(settings.urlhaus_api_key || "").includes('*') ? '' : (settings.urlhaus_api_key || "")}
+                        onChange={(e) => setSettings({...settings, urlhaus_api_key: e.target.value})}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'white' }}
+                      />
+                  </div>
+                  <div>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>ThreatFox API Key</label>
+                      <input 
+                        type="password" 
+                        placeholder={settings.threatfox_api_key || "Paste Key here..."}
+                        value={(settings.threatfox_api_key || "").includes('*') ? '' : (settings.threatfox_api_key || "")}
+                        onChange={(e) => setSettings({...settings, threatfox_api_key: e.target.value})}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'white' }}
+                      />
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>VirusTotal API Key</label>
+                      <input 
+                        type="password" 
+                        placeholder={settings.vt_api_key || "Paste Key here..."}
+                        value={(settings.vt_api_key || "").includes('*') ? '' : (settings.vt_api_key || "")}
+                        onChange={(e) => setSettings({...settings, vt_api_key: e.target.value})}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'white' }}
+                      />
+                  </div>
+                  <button type="submit" disabled={isSavingSettings} className="action-btn btn-approve" style={{ width: 'fit-content' }}>
+                      {isSavingSettings ? 'Saving...' : 'Update API Keys'}
+                  </button>
+              </form>
           </div>
           
           <h3 style={{ marginTop: '40px' }}>Firewall EDL Access Logs</h3>

@@ -101,6 +101,7 @@ def get_review_queue(db: Session = Depends(database.get_db)):
             "type": ind.indicator_type,
             "value": ind.value,
             "score": ind.vt_score,
+            "enrichment_details": ind.enrichment_details,
             "status": ind.status,
             "sender": ind.submission.sender if ind.submission else "Unknown",
             "subject": ind.submission.subject if ind.submission else "Unknown",
@@ -120,6 +121,7 @@ def get_history_queue(db: Session = Depends(database.get_db)):
             "type": ind.indicator_type,
             "value": ind.value,
             "score": ind.vt_score,
+            "enrichment_details": ind.enrichment_details,
             "status": ind.status,
             "sender": ind.submission.sender if ind.submission else "Unknown",
             "subject": ind.submission.subject if ind.submission else "Unknown",
@@ -192,6 +194,11 @@ def system_status(db: Session = Depends(database.get_db)):
     except:
         db_status = "Offline"
         
+    # Check for keys in DB as well
+    urlhaus_key = db.query(models.Setting).filter(models.Setting.key == "urlhaus_api_key").first()
+    threatfox_key = db.query(models.Setting).filter(models.Setting.key == "threatfox_api_key").first()
+    vt_key = db.query(models.Setting).filter(models.Setting.key == "vt_api_key").first()
+    
     return {
         "internal": {
             "postgres": db_status,
@@ -199,11 +206,30 @@ def system_status(db: Session = Depends(database.get_db)):
             "indicators_tracked": db.query(models.Indicator).count()
         },
         "external": {
-            "urlhaus_api": "Active Mapping",
-            "threatfox_api": "Active Mapping",
-            "virustotal_api": "Configured" if os.getenv("VT_API_KEY") else "Missing .env Key"
+            "urlhaus_api": "Authenticated" if urlhaus_key and urlhaus_key.value else "Public Mapping",
+            "threatfox_api": "Authenticated" if threatfox_key and threatfox_key.value else "Public Mapping",
+            "virustotal_api": "Configured (DB)" if vt_key and vt_key.value else ("Configured (Env)" if os.getenv("VT_API_KEY") else "Missing Key")
         }
     }
+
+@app.get("/api/settings", dependencies=[Depends(verify_admin)])
+def get_settings(db: Session = Depends(database.get_db)):
+    """Retrieves current setting keys (values masked)."""
+    settings = db.query(models.Setting).all()
+    return {s.key: (s.value[:4] + "********" if s.value and len(s.value) > 8 else "********" if s.value else "") for s in settings}
+
+@app.post("/api/settings", dependencies=[Depends(verify_admin)])
+def update_settings(data: dict, db: Session = Depends(database.get_db)):
+    """Updates or creates settings."""
+    for key, value in data.items():
+        if not value: continue # Skip empty updates
+        setting = db.query(models.Setting).filter(models.Setting.key == key).first()
+        if setting:
+            setting.value = value
+        else:
+            db.add(models.Setting(key=key, value=value))
+    db.commit()
+    return {"status": "success"}
 
 @app.get("/api/logs/edl", dependencies=[Depends(verify_admin)])
 def get_edl_logs(db: Session = Depends(database.get_db)):
