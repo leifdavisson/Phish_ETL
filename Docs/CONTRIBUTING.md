@@ -1,4 +1,3 @@
-```markdown
 # Contributing to Phish_ETL
 
 Thank you for your interest in contributing to Phish_ETL.

@@ -1,6 +1,3 @@
-## ✅ `THREAT_MODEL.md`
-
-```markdown
 # Phish_ETL — Threat Model & Security Assumptions
 
 This document outlines the security posture, trust boundaries, and known assumptions of Phish_ETL.

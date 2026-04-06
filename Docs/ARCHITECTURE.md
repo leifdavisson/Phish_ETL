@@ -1,6 +1,3 @@
-## ✅ `ARCHITECTURE.md` (with Diagram)
-
-```markdown
 # Phish_ETL — Architecture Overview
 
 This document describes the internal architecture of Phish_ETL and how data flows through the system.
