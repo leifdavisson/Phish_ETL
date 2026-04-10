@@ -229,7 +229,7 @@ function App() {
 
   return (
     <div className="dashboard-container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="header-row">
         <div>
             <h1 className="title" style={{ textAlign: 'left' }}>Phish_ETL</h1>
             <p className="subtitle" style={{ textAlign: 'left', marginBottom: '20px' }}>Automated Phishing Analysis & Triage</p>
@@ -254,7 +254,7 @@ function App() {
       </div>
 
       {activeTab === 'login' && !token && (
-        <div className="panel" style={{ maxWidth: '400px', margin: '40px auto', textAlign: 'center' }}>
+        <div className="panel auth-panel">
           <h2>Admin Authentication</h2>
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
             <input 
@@ -297,7 +297,7 @@ function App() {
         <div className="panel">
           <h2>Pending Indicators</h2>
           {queue.length === 0 ? ( <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>🎉 The queue is empty. Good job!</div> ) : (
-            <table className="data-table">
+            <div className="table-wrapper"><table className="data-table">
               <thead><tr><th>Target Value</th><th>Source Email</th><th>Type</th><th>OSINT Confidence</th><th>Sources</th><th>Actions</th></tr></thead>
               <tbody>
                 {queue.map((item: any) => (
@@ -314,7 +314,7 @@ function App() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       )}
@@ -323,7 +323,7 @@ function App() {
         <div className="panel">
           <h2>Active Threat Database</h2>
           {history.length === 0 ? ( <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No historical verdicts.</div> ) : (
-            <table className="data-table">
+            <div className="table-wrapper"><table className="data-table">
               <thead><tr><th>Target Value</th><th>Current State</th><th>Source Context</th><th>Sources</th><th>Actions</th></tr></thead>
               <tbody>
                 {history.map((item: any) => {
@@ -345,7 +345,7 @@ function App() {
                   </tr>
                 )})}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       )}
@@ -353,7 +353,7 @@ function App() {
       {activeTab === 'status' && token && (
         <div className="panel">
           <h2>System Analytics</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
+          <div className="status-grid" style={{ marginTop: '20px' }}>
             <div style={{ background: 'var(--bg-color)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
               <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginTop: 0 }}>Internal Operations</h3>
               <p><strong>PostgreSQL DB:</strong> <span style={{ color: sysStatus?.internal?.postgres === 'Online' ? 'var(--success)' : 'var(--danger)' }}>{sysStatus?.internal?.postgres || 'Checking...'}</span></p>
@@ -370,7 +370,7 @@ function App() {
 
           <div style={{ marginTop: '30px', background: 'var(--bg-color)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
               <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginTop: 0 }}>Global OSINT Settings</h3>
-              <form onSubmit={handleSaveSettings} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <form onSubmit={handleSaveSettings} className="settings-grid">
                   <div>
                       <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>URLhaus API Key</label>
                       <input 
@@ -410,7 +410,7 @@ function App() {
           <h3 style={{ marginTop: '40px' }}>Firewall EDL Access Logs</h3>
           <div style={{ background: '#0d1117', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', height: '200px', overflowY: 'auto' }}>
             {edlLogs.length === 0 ? ( <div style={{ color: 'var(--text-muted)' }}>No firewalls have fetched the feed yet.</div> ) : (
-              <table style={{ width: '100%', fontSize: '0.85rem' }}>
+              <div className="table-wrapper"><table style={{ width: '100%', fontSize: '0.85rem' }}>
                 <thead><tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}><th>Timestamp</th><th>Endpoint</th><th>Client IP</th></tr></thead>
                 <tbody>
                   {edlLogs.map((l: any) => (
@@ -421,7 +421,7 @@ function App() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
         </div>
