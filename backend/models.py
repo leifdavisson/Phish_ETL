@@ -30,7 +30,27 @@ class Indicator(Base):
     # PENDING, APPROVED (goes to fw), DENIED (false positive)
     status = Column(String, default="PENDING")
 
+    # Allowlist Context
+    is_allowlisted = Column(Boolean, default=False)
+    allowlist_reason = Column(String, nullable=True)
+
     submission = relationship("EmailSubmission", back_populates="indicators")
+
+class AllowedDomain(Base):
+    __tablename__ = "allowed_domains"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pattern = Column(String, unique=True, index=True) # e.g., "google.com" or "1.1.1.1"
+    note = Column(String, nullable=True)
+    added_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class AdminLoginLog(Base):
+    __tablename__ = "admin_login_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip_address = Column(String)
+    success = Column(Boolean)
+    attempted_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class FeedAccessLog(Base):
     __tablename__ = "feed_access_logs"

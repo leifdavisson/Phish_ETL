@@ -9,11 +9,19 @@ import enrichment
 from datetime import datetime, timedelta
 import os
 import secrets
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# Initialize Rate Limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # Initialize the db tables 
 models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(title="Phish_ETL API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Setup Authentication Secrets
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "supersecret")
@@ -27,8 +35,18 @@ def verify_admin(request: Request):
     return True
 
 @app.post("/api/login")
-def login(data: dict):
+@limiter.limit("5/minute")
+def login(data: dict, request: Request, db: Session = Depends(database.get_db)):
+    success = False
     if data.get("password") == ADMIN_PASSWORD:
+        success = True
+    
+    # Audit Logging
+    log = models.AdminLoginLog(ip_address=request.client.host, success=success)
+    db.add(log)
+    db.commit()
+
+    if success:
         return {"token": ACTIVE_TOKEN}
     raise HTTPException(status_code=401, detail="Invalid password")
 
@@ -84,8 +102,29 @@ async def ingest_email(
     
     # Asynchronous Enrichment Launch
     inds = db.query(models.Indicator).filter(models.Indicator.submission_id == submission.id).all()
+    
+    # Global Trusted Domains
+    GLOBAL_TRUSTED = ["google.com", "microsoft.com", "fortinet.com", "paloaltonetworks.com", "google.co.uk", "office.com"]
+    CUSTOM_TRUSTED = [d.pattern.lower() for d in db.query(models.AllowedDomain).all() if d.pattern]
+    SUSPECT_PROVIDERS = ["github.com", "dropbox.com", "onedrive.live.com", "sharepoint.com", "s3.amazonaws.com", "storage.googleapis.com", "web.app", "firebaseapp.com", "vercel.app"]
+
     for ind in inds:
+        # Check if allowlisted or suspect
+        val = ind.value.lower()
+        if any(trusted in val for trusted in GLOBAL_TRUSTED):
+            ind.is_allowlisted = True
+            ind.allowlist_reason = "Global Trusted Provider"
+        elif any(trusted in val for trusted in CUSTOM_TRUSTED):
+            ind.is_allowlisted = True
+            ind.allowlist_reason = "Admin Defined Allowlist"
+        elif any(suspect in val for suspect in SUSPECT_PROVIDERS):
+            ind.is_allowlisted = False # Still suspect, but we tag it in reason for UI alert
+            ind.allowlist_reason = "Suspect Provider (Commonly Abused)"
+        
+        db.add(ind) # Mark dirty for save
         background_tasks.add_task(enrichment.enrich_indicator, ind.id)
+    
+    db.commit() # Save all allowlist/flagging changes once
     
     return {"status": "success", "message": f"Ingested {filename}", "id": submission.id, "indicators": len(parsed_data["indicators"])}
 
@@ -103,6 +142,8 @@ def get_review_queue(db: Session = Depends(database.get_db)):
             "score": ind.vt_score,
             "enrichment_details": ind.enrichment_details,
             "status": ind.status,
+            "is_allowlisted": ind.is_allowlisted,
+            "allowlist_reason": ind.allowlist_reason,
             "sender": ind.submission.sender if ind.submission else "Unknown",
             "subject": ind.submission.subject if ind.submission else "Unknown",
             "submitted_at": ind.submission.submitted_at.isoformat() if ind.submission and ind.submission.submitted_at else datetime.utcnow().isoformat()
@@ -123,6 +164,8 @@ def get_history_queue(db: Session = Depends(database.get_db)):
             "score": ind.vt_score,
             "enrichment_details": ind.enrichment_details,
             "status": ind.status,
+            "is_allowlisted": ind.is_allowlisted,
+            "allowlist_reason": ind.allowlist_reason,
             "sender": ind.submission.sender if ind.submission else "Unknown",
             "subject": ind.submission.subject if ind.submission else "Unknown",
             "submitted_at": ind.submission.submitted_at.isoformat() if ind.submission and ind.submission.submitted_at else datetime.utcnow().isoformat()
@@ -154,13 +197,15 @@ def export_edl(feed_type: str, request: Request, db: Session = Depends(database.
     db.add(log)
     db.commit()
 
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    # TTL Logic
+    ttl_days = int(os.getenv("INDICATOR_TTL_DAYS", 30))
+    expiration_date = datetime.utcnow() - timedelta(days=ttl_days)
     
     indicators = (db.query(models.Indicator)
         .join(models.Indicator.submission)
         .filter(models.Indicator.status == "APPROVED")
         .filter(models.Indicator.indicator_type == feed_type_upper)
-        .filter(models.EmailSubmission.submitted_at >= thirty_days_ago)
+        .filter(models.EmailSubmission.submitted_at >= expiration_date)
         .all())
     
     # Deduplicate arrays explicitly via set()
@@ -203,7 +248,8 @@ def system_status(db: Session = Depends(database.get_db)):
         "internal": {
             "postgres": db_status,
             "emails_parsed": db.query(models.EmailSubmission).count(),
-            "indicators_tracked": db.query(models.Indicator).count()
+            "indicators_tracked": db.query(models.Indicator).count(),
+            "indicator_ttl_days": int(os.getenv("INDICATOR_TTL_DAYS", 30))
         },
         "external": {
             "urlhaus_api": "Authenticated" if urlhaus_key and urlhaus_key.value else "Public Mapping",
@@ -236,3 +282,40 @@ def get_edl_logs(db: Session = Depends(database.get_db)):
     """Returns the scrolling access logs for Palo Alto fetching blocks."""
     logs = db.query(models.FeedAccessLog).order_by(models.FeedAccessLog.id.desc()).limit(50).all()
     return [{"id": l.id, "endpoint": l.endpoint, "ip": l.ip_address, "time": l.accessed_at.isoformat()} for l in logs]
+
+@app.get("/api/logs/admin", dependencies=[Depends(verify_admin)])
+def get_admin_logs(db: Session = Depends(database.get_db)):
+    """Returns recent admin login logs for security auditing."""
+    logs = db.query(models.AdminLoginLog).order_by(models.AdminLoginLog.id.desc()).limit(50).all()
+    return [{"id": l.id, "ip": l.ip_address, "success": l.success, "time": l.attempted_at.isoformat()} for l in logs]
+
+@app.get("/api/allowlist", dependencies=[Depends(verify_admin)])
+def get_allowlist(db: Session = Depends(database.get_db)):
+    """Returns custom allowlisted patterns."""
+    domains = db.query(models.AllowedDomain).all()
+    return [{"id": d.id, "pattern": d.pattern, "note": d.note, "added_at": d.added_at.isoformat()} for d in domains]
+
+@app.post("/api/allowlist", dependencies=[Depends(verify_admin)])
+def add_allowlist(data: dict, db: Session = Depends(database.get_db)):
+    """Adds a new pattern to custom allowlist."""
+    pattern = data.get("pattern", "").lower().strip()
+    if not pattern:
+        raise HTTPException(status_code=400, detail="Pattern required")
+    existing = db.query(models.AllowedDomain).filter(models.AllowedDomain.pattern == pattern).first()
+    if existing:
+         raise HTTPException(status_code=400, detail="Pattern already exists")
+    
+    new_d = models.AllowedDomain(pattern=pattern, note=data.get("note"))
+    db.add(new_d)
+    db.commit()
+    return {"status": "success"}
+
+@app.delete("/api/allowlist/{item_id}", dependencies=[Depends(verify_admin)])
+def delete_allowlist(item_id: int, db: Session = Depends(database.get_db)):
+    """Removes a pattern from allowlist."""
+    d = db.query(models.AllowedDomain).filter(models.AllowedDomain.id == item_id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(d)
+    db.commit()
+    return {"status": "success"}

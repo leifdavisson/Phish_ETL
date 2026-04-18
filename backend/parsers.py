@@ -13,9 +13,17 @@ def extract_indicators(text: str) -> List[Dict[str, str]]:
     indicators = []
     seen = set()
     
+    IGNORED_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.bmp', '.css', '.js', '.woff', '.woff2')
+    
     # Extract URLs
     for url in URL_REGEX.findall(text):
         url = url.strip()
+        
+        # Discard URL if it appears to be a static image/asset
+        base_url = url.lower().split('?')[0].split('#')[0]
+        if any(base_url.endswith(ext) for ext in IGNORED_EXTS):
+            continue
+            
         if url not in seen:
             seen.add(url)
             indicators.append({"type": "URL", "value": url})

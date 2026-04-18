@@ -129,11 +129,10 @@ Admins can review:
 - Firewall EDL access logs
 
 ![System Analytics](docs/images/system-analytics.png)
-
-
-
-
-TO DO: 
-GLOBAL ALLOW LIST -
-SUBMISSION THROTTLING
-Web Vulernability Test
+## Admin & Security Enhancements (Added 2026-04-18)
+- **Interactive Setup**: Run `./setup.sh` to configure the environment.
+- **Global Allowlist**: Manage trusted domains/IPs in the Admin Portal.
+- **Security Logs**: Audit admin login attempts and firewall list access.
+- **Auto-HTTPS**: Easy TLS setup via Caddy.
+- **Brute Force Protection**: Hardened login interface.
+- **Suspect Flagging**: Automatic alerts for commonly abused legitimate providers.

@@ -1,12 +1,53 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
+const TruncatedText = ({ text, maxLength = 60 }: { text: string, maxLength?: number }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  if (!text) return null;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const shouldTruncate = text.length > maxLength;
+  const displayText = (shouldTruncate && !isExpanded) ? text.substring(0, maxLength) + '...' : text;
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', width: '100%', wordBreak: 'break-all' }}>
+      <span>{displayText}</span>
+      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+        {shouldTruncate && (
+          <button 
+            onClick={() => setIsExpanded(!isExpanded)} 
+            style={{ background: 'transparent', border: 'none', color: 'var(--accent-color)', cursor: 'pointer', fontSize: '0.8em', padding: 0 }}
+          >
+            {isExpanded ? 'Show less' : 'Expand ▾'}
+          </button>
+        )}
+        <button 
+          onClick={handleCopy} 
+          style={{ background: 'transparent', border: 'none', color: copied ? 'var(--success)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8em', padding: 0 }}
+          title="Copy to clipboard"
+        >
+          {copied ? '✓ Copied' : '📋 Copy'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [activeTab, setActiveTab] = useState('submit');
   const [queue, setQueue] = useState([]);
   const [history, setHistory] = useState([]);
   const [sysStatus, setSysStatus] = useState<any>(null);
   const [edlLogs, setEdlLogs] = useState([]);
+  const [adminLogs, setAdminLogs] = useState([]);
+  const [allowlist, setAllowlist] = useState([]);
   const [settings, setSettings] = useState<any>({ urlhaus_api_key: '', threatfox_api_key: '', vt_api_key: '' });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   
@@ -22,13 +63,26 @@ function App() {
 
   useEffect(() => {
     if (!token) return;
+    
+    if (!sysStatus) fetchStatus();
+
     if (activeTab === 'review') fetchQueue();
     else if (activeTab === 'threatdb') fetchHistory();
+    else if (activeTab === 'allowlist') fetchAllowlist();
     else if (activeTab === 'status') {
       fetchStatus();
       fetchSettings();
+      fetchAdminLogs();
     }
-  }, [activeTab, token]);
+
+    // Auto-refresh queue and history every 10s
+    const interval = setInterval(() => {
+      if (activeTab === 'review') fetchQueue();
+      else if (activeTab === 'threatdb') fetchHistory();
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [activeTab, token, sysStatus]);
 
   const authFetch = async (url: string, options: any = {}) => {
     const headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` };
@@ -101,8 +155,45 @@ function App() {
     try {
       const res = await authFetch('/api/settings');
       const data = await res.json();
-      // Merge with defaults to ensure keys exist
       setSettings((prev: any) => ({ ...prev, ...data }));
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchAllowlist = async () => {
+    try {
+      const res = await authFetch('/api/allowlist');
+      const data = await res.json();
+      setAllowlist(data);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleAddAllowlist = async (pattern: string, note: string) => {
+    try {
+      const res = await authFetch('/api/allowlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pattern, note })
+      });
+      if (res.ok) fetchAllowlist();
+      else {
+          const err = await res.json();
+          alert(err.detail || "Failed to add to allowlist");
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteAllowlist = async (id: number) => {
+    try {
+      await authFetch(`/api/allowlist/${id}`, { method: 'DELETE' });
+      fetchAllowlist();
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchAdminLogs = async () => {
+    try {
+      const res = await authFetch('/api/logs/admin');
+      const data = await res.json();
+      setAdminLogs(data);
     } catch (err) { console.error(err); }
   };
 
@@ -205,6 +296,11 @@ function App() {
     return (
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         {Object.entries(details).map(([source, data]: [string, any]) => {
+          // Hide VirusTotal badge if API Key is not configured
+          if (source === 'VirusTotal' && sysStatus?.external?.virustotal_api === 'Missing Key') {
+            return null;
+          }
+
           let bgColor = 'var(--bg-secondary)'; // default
           let color = 'white';
           
@@ -247,8 +343,9 @@ function App() {
           <>
             <button className={`tab-btn ${activeTab === 'review' ? 'active' : ''}`} onClick={() => setActiveTab('review')}>Admin Review Queue</button>
             <button className={`tab-btn ${activeTab === 'threatdb' ? 'active' : ''}`} onClick={() => setActiveTab('threatdb')}>Threat Database</button>
+            <button className={`tab-btn ${activeTab === 'allowlist' ? 'active' : ''}`} onClick={() => setActiveTab('allowlist')}>Global Allowlist</button>
             <button className={`tab-btn ${activeTab === 'howto' ? 'active' : ''}`} onClick={() => setActiveTab('howto')}>Integration Guides</button>
-            <button className={`tab-btn ${activeTab === 'status' ? 'active' : ''}`} onClick={() => setActiveTab('status')}>System Analytics</button>
+            <button className={`tab-btn ${activeTab === 'status' ? 'active' : ''}`} onClick={() => setActiveTab('status')}>Security Logs</button>
           </>
         )}
       </div>
@@ -298,12 +395,24 @@ function App() {
           <h2>Pending Indicators</h2>
           {queue.length === 0 ? ( <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>🎉 The queue is empty. Good job!</div> ) : (
             <div className="table-wrapper"><table className="data-table">
-              <thead><tr><th>Target Value</th><th>Source Email</th><th>Type</th><th>OSINT Confidence</th><th>Sources</th><th>Actions</th></tr></thead>
+              <thead><tr><th style={{ width: '35%' }}>Target Value</th><th style={{ width: '20%' }}>Source Email</th><th style={{ width: '8%' }}>Type</th><th style={{ width: '12%' }}>OSINT Confidence</th><th style={{ width: '12%' }}>Sources</th><th style={{ width: '13%' }}>Actions</th></tr></thead>
               <tbody>
                 {queue.map((item: any) => (
-                  <tr key={item.id}>
-                    <td style={{ fontWeight: '600' }}>{item.value}</td>
-                    <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}><strong>{item.sender}</strong><br/>{item.subject}</td>
+                  <tr key={item.id} style={{ borderLeft: item.is_allowlisted ? '4px solid var(--success)' : 'none' }}>
+                    <td style={{ fontWeight: '600' }}>
+                      <TruncatedText text={item.value} />
+                      {item.is_allowlisted && (
+                        <div style={{ color: 'var(--success)', fontSize: '0.7em', marginTop: '4px' }}>
+                          🛡️ TRUSTED: {item.allowlist_reason}
+                        </div>
+                      )}
+                      {item.allowlist_reason === "Suspect Provider (Commonly Abused)" && (
+                        <div style={{ color: 'var(--danger)', fontSize: '0.7em', marginTop: '4px', fontWeight: 'bold' }}>
+                          ⚠️ ALERT: {item.allowlist_reason}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}><strong><TruncatedText text={item.sender} maxLength={40} /></strong><br/><TruncatedText text={item.subject} maxLength={40} /></td>
                     <td>{item.type}</td>
                     <td>{renderOsintScore(item.score)}</td>
                     <td>{renderSourceBreakdown(item.enrichment_details)}</td>
@@ -324,19 +433,22 @@ function App() {
           <h2>Active Threat Database</h2>
           {history.length === 0 ? ( <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No historical verdicts.</div> ) : (
             <div className="table-wrapper"><table className="data-table">
-              <thead><tr><th>Target Value</th><th>Current State</th><th>Source Context</th><th>Sources</th><th>Actions</th></tr></thead>
+              <thead><tr><th style={{ width: '35%' }}>Target Value</th><th style={{ width: '15%' }}>Current State</th><th style={{ width: '20%' }}>Source Context</th><th style={{ width: '15%' }}>Sources</th><th style={{ width: '15%' }}>Actions</th></tr></thead>
               <tbody>
                 {history.map((item: any) => {
+                  const ttl = sysStatus?.internal?.indicator_ttl_days || 30;
                   const daysOld = Math.floor((new Date().getTime() - new Date(item.submitted_at).getTime()) / (1000 * 3600 * 24));
-                  const daysLeft = Math.max(0, 30 - daysOld);
+                  const daysLeft = Math.max(0, ttl - daysOld);
                   return (
                   <tr key={item.id} style={{ opacity: item.status === 'DENIED' ? 0.6 : 1 }}>
-                    <td style={{ fontWeight: '600', color: item.status === 'APPROVED' ? '#ff7b72' : 'inherit' }}>{item.value}</td>
+                    <td style={{ fontWeight: '600', color: item.status === 'APPROVED' ? '#ff7b72' : 'inherit' }}>
+                        <TruncatedText text={item.value} />
+                    </td>
                     <td>
                       <span style={{ background: item.status === 'APPROVED' ? 'rgba(215, 58, 73, 0.2)' : 'rgba(110, 118, 129, 0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8em', fontWeight: 'bold' }}>{item.status}</span>
                       {item.status === 'APPROVED' && ( <div style={{ marginTop: '8px', fontSize: '0.8em', color: daysLeft <= 5 ? 'var(--danger)' : 'var(--text-muted)' }}>⏳ Expires in {daysLeft} days</div> )}
                     </td>
-                    <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}><strong>{item.sender}</strong><br/>{item.subject}</td>
+                    <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}><strong><TruncatedText text={item.sender} maxLength={40} /></strong><br/><TruncatedText text={item.subject} maxLength={40} /></td>
                     <td>{renderSourceBreakdown(item.enrichment_details)}</td>
                     <td style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <button className="action-btn" style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }} onClick={() => handleUndo(item.id)}>Undo Verdict</button>
@@ -350,9 +462,47 @@ function App() {
         </div>
       )}
 
+      {activeTab === 'allowlist' && token && (
+        <div className="panel">
+          <h2>Global Allowlist Management</h2>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>Patterns added here will be automatically marked as <strong>Trusted</strong> and will not be sent to the firewall, even if detected in a phishing email.</p>
+          
+          <div style={{ background: 'var(--bg-color)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '30px' }}>
+            <h3 style={{ marginTop: 0 }}>Add New Trusted Pattern</h3>
+            <form onSubmit={(e: any) => {
+              e.preventDefault();
+              handleAddAllowlist(e.target.pattern.value, e.target.note.value);
+              e.target.reset();
+            }} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <input name="pattern" placeholder="Domain or IP (e.g. mycorp.com)" style={{ flex: 2, padding: '10px', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'white' }} required />
+              <input name="note" placeholder="Note (e.g. Internal Mail Server)" style={{ flex: 3, padding: '10px', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'white' }} />
+              <button type="submit" className="action-btn btn-approve" style={{ flex: 1 }}>Add Pattern</button>
+            </form>
+          </div>
+
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead><tr><th style={{ width: '40%' }}>Pattern</th><th style={{ width: '30%' }}>Note</th><th style={{ width: '15%' }}>Added At</th><th style={{ width: '15%' }}>Action</th></tr></thead>
+              <tbody>
+                {allowlist.length === 0 ? ( <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No custom patterns defined.</td></tr> ) : (
+                  allowlist.map((item: any) => (
+                    <tr key={item.id}>
+                      <td style={{ fontWeight: 'bold' }}>{item.pattern}</td>
+                      <td>{item.note}</td>
+                      <td style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>{new Date(item.added_at).toLocaleString()}</td>
+                      <td><button className="action-btn" style={{ background: 'var(--danger)', color: 'white' }} onClick={() => handleDeleteAllowlist(item.id)}>Remove</button></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'status' && token && (
         <div className="panel">
-          <h2>System Analytics</h2>
+          <h2>Security & System Analytics</h2>
           <div className="status-grid" style={{ marginTop: '20px' }}>
             <div style={{ background: 'var(--bg-color)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
               <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginTop: 0 }}>Internal Operations</h3>
@@ -407,6 +557,24 @@ function App() {
               </form>
           </div>
           
+          <h3 style={{ marginTop: '40px' }}>Admin Login Audit (Brute Force Monitoring)</h3>
+          <div style={{ background: '#0d1117', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', height: '200px', overflowY: 'auto' }}>
+            {adminLogs.length === 0 ? ( <div style={{ color: 'var(--text-muted)' }}>No login attempts recorded yet.</div> ) : (
+              <div className="table-wrapper"><table style={{ width: '100%', fontSize: '0.85rem' }}>
+                <thead><tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}><th>Timestamp</th><th>IP Address</th><th>Result</th></tr></thead>
+                <tbody>
+                  {adminLogs.map((l: any) => (
+                    <tr key={l.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td style={{ padding: '8px 0', fontFamily: 'monospace' }}>{new Date(l.time).toLocaleString()}</td>
+                      <td style={{ color: '#ff7b72' }}>{l.ip}</td>
+                      <td style={{ color: l.success ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>{l.success ? 'SUCCESS' : 'FAILED'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table></div>
+            )}
+          </div>
+
           <h3 style={{ marginTop: '40px' }}>Firewall EDL Access Logs</h3>
           <div style={{ background: '#0d1117', padding: '15px', borderRadius: '6px', border: '1px solid #30363d', height: '200px', overflowY: 'auto' }}>
             {edlLogs.length === 0 ? ( <div style={{ color: 'var(--text-muted)' }}>No firewalls have fetched the feed yet.</div> ) : (

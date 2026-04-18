@@ -1,0 +1,7 @@
+:80 {
+    reverse_proxy frontend:5173
+    
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+}
