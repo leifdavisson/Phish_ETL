@@ -131,3 +131,9 @@ Admins can review:
 ![System Analytics](docs/images/system-analytics.png)
 
 
+
+
+TO DO: 
+GLOBAL ALLOW LIST -
+SUBMISSION THROTTLING
+Web Vulernability Test
